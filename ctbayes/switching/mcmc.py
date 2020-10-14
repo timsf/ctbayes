@@ -25,6 +25,7 @@ class Model(NamedTuple):
 
 
 class Controls(NamedTuple):
+    opt_acc_prob: float = 0.2
     pr_portkey: float = 0.1
     n_cores: int = 1
     ea_batch_size: int = 10
@@ -36,7 +37,7 @@ def sample_posterior(init_thi: np.ndarray, mod: Model, ctrl: Controls, ome: np.r
     lam = mjp_inf.get_ev(*mod.hyper_lam)
     thi = np.repeat(init_thi[np.newaxis], lam.shape[0], 0)
     z, h = mod.sample_aug(thi, mjp_skel.sample_forwards(mod.t[-1], None, lam), mod.t, mod.vt, ome)
-    param_samplers = [[MyopicRwSampler(init_thi_, -np.log(len(mod.t)), bounds_thi_, opt_prob=.2)
+    param_samplers = [[MyopicRwSampler(init_thi_, -np.log(len(mod.t)) / 2, bounds_thi_, ctrl.opt_acc_prob)
                        for init_thi_, bounds_thi_ in zip(init_thi, np.array(mod.bounds_thi).T)]
                       for _ in range(lam.shape[0])]
     while True:
