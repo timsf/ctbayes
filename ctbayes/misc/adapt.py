@@ -78,20 +78,17 @@ class MyopicMjpSampler(object):
         self.emp_prob = [1]
         self.adapt_periods = [0, 1]
 
-    def propose(self, lam: np.ndarray, t: np.ndarray) -> mjp_skel.Partition:
+    def propose(self, lam: np.ndarray, t: np.ndarray, ome: np.random.Generator) -> (mjp_skel.Skeleton, np.ndarray):
 
-        n_cond = np.random.binomial(len(t), 1 / (1 + np.exp(self.prop_log_scale[-1])))
-        t_cond = np.sort(np.random.choice(t, n_cond))
-        return [eta_ for eta_
-                in mjp_skel.mutate_partition(mjp_skel.partition_skeleton(self.state, t_cond), lam)
-                if eta_.fin_t != 0]
+        p_cond = 1 / (1 + np.exp(self.prop_log_scale[-1]))
+        t_cond = t[np.random.uniform(size=len(t)) < p_cond]
+        prop = mjp_skel.paste_partition(mjp_skel.mutate_partition(mjp_skel.partition_skeleton(self.state, t_cond), lam, ome))
+        return (prop, t_cond)
 
-    def adapt(self, sample: mjp_skel.Skeleton, prob: float):
+    def adapt(self, prob: float):
 
-        self.state = sample
         self.emp_prob.append(prob)
         if len(self.emp_prob) == self.adapt_periods[-1] + 1:
             learning_rate = 1 / (len(self.adapt_periods) ** self.adapt_decay)
-            mean_prob = np.mean(self.emp_prob[self.adapt_periods[-2]:])
-            self.prop_log_scale.append(self.prop_log_scale[-1] + learning_rate * (mean_prob - self.opt_prob))
+            self.prop_log_scale.append(self.prop_log_scale[-1] + learning_rate * (prob - self.opt_prob))
             self.adapt_periods.append(self.adapt_periods[-1] + len(self.adapt_periods) ** self.air)

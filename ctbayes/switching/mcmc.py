@@ -6,7 +6,7 @@ from joblib import Parallel, delayed
 from ctbayes.ea3lib import seed as sde_seed
 from ctbayes.mjplib import inference as mjp_inf, skeleton as mjp_skel
 from ctbayes.switching import types
-from ctbayes.misc.rw import MyopicRwSampler
+from ctbayes.misc.adapt import MyopicRwSampler, MyopicMjpSampler
 from ctbayes.misc.bfactories import sample_twocoin, sample_twocoin_joint
 
 
@@ -36,23 +36,26 @@ def sample_posterior(init_thi: np.ndarray, mod: Model, ctrl: Controls, ome: np.r
 
     lam = mjp_inf.get_ev(*mod.hyper_lam)
     thi = np.repeat(init_thi[np.newaxis], lam.shape[0], 0)
-    z, h = mod.sample_aug(thi, mjp_skel.sample_forwards(mod.t[-1], None, lam), mod.t, mod.vt, ome)
-    param_samplers = [[MyopicRwSampler(init_thi_, -np.log(len(mod.t)) / 2, bounds_thi_, ctrl.opt_acc_prob)
+    y = mjp_skel.sample_forwards(mod.t[-1], None, lam, ome)
+    z, h = mod.sample_aug(thi, y, mod.t, mod.vt, ome)
+    param_samplers = [[MyopicRwSampler(init_thi_, -np.log(len(mod.t)) * lam.shape[0] / 2, bounds_thi_, ctrl.opt_acc_prob)
                        for init_thi_, bounds_thi_ in zip(init_thi, np.array(mod.bounds_thi).T)]
                       for _ in range(lam.shape[0])]
+    regime_sampler = MyopicMjpSampler(y, ctrl.opt_acc_prob)
     while True:
-        thi, lam, z, h = update_joint(thi, lam, z, h, mod, ctrl, param_samplers, ome)
+        thi, lam, z, h = update_joint(thi, lam, z, h, mod, ctrl, param_samplers, regime_sampler, ome)
         yield thi, lam, z, h
 
 
 def update_joint(thi: np.ndarray, lam: np.ndarray, z: sde_seed.Partition, h: types.Anchorage,
-                 mod: Model, ctrl: Controls, param_sampler: List[List[MyopicRwSampler]], ome: np.random.Generator
+                 mod: Model, ctrl: Controls, param_sampler: List[List[MyopicRwSampler]], 
+                 regime_sampler: MyopicMjpSampler, ome: np.random.Generator
                  ) -> (np.ndarray, np.ndarray, sde_seed.Partition, types.Anchorage):
 
     with Parallel(ctrl.n_cores, 'loky') as pool:
         for sector in range(thi.shape[1]):
             thi, z = update_params(thi, z, h, mod, ctrl, param_sampler, sector, ome, pool)
-            z, h = update_hidden(thi, lam, z, h, mod, ctrl, ome, pool)
+            z, h = update_hidden(thi, lam, z, h, mod, ctrl, regime_sampler, ome, pool)
     lam = update_generator(h, mod.hyper_lam, ome)
     return thi, lam, z, h
 
@@ -136,31 +139,28 @@ def flip_param_coin(thi_nil: np.ndarray, thi_prime: np.ndarray, fin_t: float, in
 
 
 def update_hidden(thi: np.ndarray, lam: np.ndarray, z_nil: sde_seed.Partition, h_nil: types.Anchorage,
-                  mod: Model, ctrl: Controls, ome: np.random.Generator, pool: Parallel
+                  mod: Model, ctrl: Controls, regime_sampler: MyopicMjpSampler, ome: np.random.Generator, pool: Parallel
                   ) -> (mjp_skel.Skeleton, sde_seed.Partition, types.Anchorage):
 
-    n_cond = ome.choice(list(range(len(mod.t) - 1)), 1)
-    t_cond = np.sort(ome.choice(mod.t[1:-1], n_cond, replace=False))
-    z_nil_part, h_nil_part = split_hidden(z_nil, h_nil, t_cond)
-    y_nil = mjp_skel.Skeleton(h_nil.t[:-1], h_nil.yt[:-1], h_nil.t[-1])
-
-    y_prime = mjp_skel.paste_partition(mjp_skel.mutate_partition(mjp_skel.partition_skeleton(y_nil, t_cond), lam, ome))
+    y_prime, t_cond = regime_sampler.propose(lam, mod.t[1:-1], ome)
     z_prime, h_prime = mod.sample_aug(thi, y_prime, mod.t, mod.vt, ome)
+    z_nil_part, h_nil_part = split_hidden(z_nil, h_nil, t_cond)
     z_prime_part, h_prime_part = split_hidden(z_prime, h_prime, t_cond)
-
     new_ome = [np.random.default_rng(seed_) for seed_ in ome.bit_generator._seed_seq.spawn(len(z_nil_part))]
-    z_acc_part, h_acc_part = zip(*pool(
+    
+    acc, z_acc_part, h_acc_part = zip(*pool(
         delayed(update_hidden_section)(thi, lam, z_nil_, h_nil_, z_prime_, h_prime_, mod, ctrl, ome_)
         for z_nil_, z_prime_, h_nil_, h_prime_, ome_
         in zip(z_nil_part, z_prime_part, h_nil_part, h_prime_part, new_ome)))
     
     z_acc, h_acc = paste_hidden(z_acc_part, h_acc_part)
+    regime_sampler.adapt(np.mean(acc))
     return z_acc, h_acc
 
 
 def update_hidden_section(thi: np.ndarray, lam: np.ndarray, z_nil: sde_seed.Partition, h_nil: types.Anchorage,
                           z_prime: sde_seed.Partition, h_prime: types.Anchorage, mod: Model, ctrl: Controls, 
-                          ome: np.random.Generator) -> (sde_seed.Partition, types.Anchorage):
+                          ome: np.random.Generator) -> (bool, sde_seed.Partition, types.Anchorage):
 
     def coin(z: sde_seed.Partition, h: types.Anchorage) -> Iterator[Tuple[bool, sde_seed.Partition]]:
         new_z = z
@@ -173,8 +173,8 @@ def update_hidden_section(thi: np.ndarray, lam: np.ndarray, z_nil: sde_seed.Part
     accept, _, z_acc = sample_twocoin(weight_prime, weight_nil, coin(z_prime, h_prime), coin(z_nil, h_nil),
                                       ctrl.pr_portkey, z_nil, ome=ome)
     if accept:
-        return z_acc, h_prime
-    return z_acc, h_nil
+        return accept, z_acc, h_prime
+    return accept, z_acc, h_nil
 
 
 def eval_hidden_weight(thi: np.ndarray, z: sde_seed.Partition, h: types.Anchorage, mod: Model) -> float:

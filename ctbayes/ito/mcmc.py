@@ -5,8 +5,8 @@ from joblib import Parallel, delayed
 
 from ctbayes.ea3lib import seed
 from ctbayes.mjplib.skeleton import sample_batch_ppp
+from ctbayes.misc.adapt import MyopicRwSampler
 from ctbayes.misc.bfactories import sample_twocoin, sample_twocoin_joint
-from ctbayes.misc.rw import MyopicRwSampler
 
 
 class Model(NamedTuple):
