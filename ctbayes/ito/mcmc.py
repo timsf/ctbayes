@@ -23,7 +23,7 @@ class Model(NamedTuple):
 
 
 class Controls(NamedTuple):
-    opt_acc_prob: float = 0.2
+    opt_acc_prob: float = 0.17
     pr_portkey: float = 0.1
     n_aux_renewals: int = 1
     n_cores: int = 1

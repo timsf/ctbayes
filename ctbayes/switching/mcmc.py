@@ -25,7 +25,7 @@ class Model(NamedTuple):
 
 
 class Controls(NamedTuple):
-    opt_acc_prob: float = 0.2
+    opt_acc_prob: float = 0.17
     pr_portkey: float = 0.1
     n_cores: int = 1
     ea_batch_size: int = 10
@@ -146,15 +146,15 @@ def update_hidden(thi: np.ndarray, lam: np.ndarray, z_nil: sde_seed.Partition, h
     z_prime, h_prime = mod.sample_aug(thi, y_prime, mod.t, mod.vt, ome)
     z_nil_part, h_nil_part = split_hidden(z_nil, h_nil, t_cond)
     z_prime_part, h_prime_part = split_hidden(z_prime, h_prime, t_cond)
+
     new_ome = [np.random.default_rng(seed_) for seed_ in ome.bit_generator._seed_seq.spawn(len(z_nil_part))]
-    
     acc, z_acc_part, h_acc_part = zip(*pool(
         delayed(update_hidden_section)(thi, lam, z_nil_, h_nil_, z_prime_, h_prime_, mod, ctrl, ome_)
         for z_nil_, z_prime_, h_nil_, h_prime_, ome_
         in zip(z_nil_part, z_prime_part, h_nil_part, h_prime_part, new_ome)))
     
     z_acc, h_acc = paste_hidden(z_acc_part, h_acc_part)
-    regime_sampler.adapt(np.mean(acc))
+    regime_sampler.adapt(types.prune_anchorage(h_acc), np.mean(acc))
     return z_acc, h_acc
 
 
