@@ -45,7 +45,7 @@ class MyopicRwSampler(object):
         self.adapt_decay = adapt_decay
         self.air = air
         self.log_prop_scale = [init_rate]
-        self.emp_prob = [1]
+        self.emp_prob = [1.0]
         self.adapt_periods = [0, 1]
 
     def propose(self, ome: np.random.Generator) -> (float, float):
@@ -75,7 +75,7 @@ class MyopicMjpSampler(object):
         self.adapt_decay = adapt_decay
         self.air = air
         self.log_prop_scale = [0]
-        self.emp_prob = [1]
+        self.emp_prob = [1.0]
         self.adapt_periods = [0, 1]
 
     def propose(self, lam: np.ndarray, t: np.ndarray, ome: np.random.Generator) -> (mjp_skel.Skeleton, np.ndarray):

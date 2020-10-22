@@ -80,6 +80,8 @@ def update_params(thi_nil: np.ndarray, z: sde_seed.Partition, h: types.Anchorage
 
     thi_prime = np.array([thi_part[i][i] for i in range(thi_nil.shape[0])])
     new_z = [z_part[y0][i] for i, y0 in enumerate(h.yt[:-1])]
+    for i in range(thi_nil.shape[0]):
+        param_samplers[i][sector].adapt(thi_prime[i, sector], float(thi_prime[i, sector] != thi_nil[i, sector]))
     return thi_prime, new_z
 
 
@@ -106,7 +108,6 @@ def update_params_section(thi_nil: np.ndarray, z: sde_seed.Partition, h: types.A
     weight_prime = eval_param_weight(thi_prime, h, mod, state)
     accept, _, z_acc = sample_twocoin_joint(weight_prime, weight_nil, coin(), ctrl.pr_portkey, ome)
     thi_acc = thi_prime if accept else thi_nil
-    param_samplers[state][sector].adapt(thi_acc[state][sector], float(accept))
     return thi_acc, z_acc
 
 
