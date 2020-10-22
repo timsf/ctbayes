@@ -47,14 +47,23 @@ def sample_posterior(init_thi: np.ndarray, mod: Model, ctrl: Controls, ome: np.r
         yield thi, lam, z, h
 
 
+def resume_sampling(thi: np.ndarray, lam: np.ndarray, z: sde_seed.Partition, h: types.Anchorage,
+                    mod: Model, ctrl: Controls, param_samplers: List[List[MyopicRwSampler]], 
+                    regime_sampler: MyopicMjpSampler, ome: np.random.Generator
+                    ) -> Iterator[Tuple[np.ndarray, np.ndarray, sde_seed.Partition, types.Anchorage]]:
+    while True:
+        thi, lam, z, h = update_joint(thi, lam, z, h, mod, ctrl, param_samplers, regime_sampler, ome)
+        yield thi, lam, z, h
+
+
 def update_joint(thi: np.ndarray, lam: np.ndarray, z: sde_seed.Partition, h: types.Anchorage,
-                 mod: Model, ctrl: Controls, param_sampler: List[List[MyopicRwSampler]], 
+                 mod: Model, ctrl: Controls, param_samplers: List[List[MyopicRwSampler]], 
                  regime_sampler: MyopicMjpSampler, ome: np.random.Generator
                  ) -> (np.ndarray, np.ndarray, sde_seed.Partition, types.Anchorage):
 
     with Parallel(ctrl.n_cores, 'loky') as pool:
         for sector in range(thi.shape[1]):
-            thi, z = update_params(thi, z, h, mod, ctrl, param_sampler, sector, ome, pool)
+            thi, z = update_params(thi, z, h, mod, ctrl, param_samplers, sector, ome, pool)
             z, h = update_hidden(thi, lam, z, h, mod, ctrl, regime_sampler, ome, pool)
     lam = update_generator(h, mod.hyper_lam, ome)
     return thi, lam, z, h

@@ -17,6 +17,7 @@ jupyter = "*"
 matplotlib = "*"
 seaborn = "*"
 pylint = "*"
+rope = "*"
 
 [requires]
 python_version = "3.8"

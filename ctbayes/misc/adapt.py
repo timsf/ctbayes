@@ -74,13 +74,13 @@ class MyopicMjpSampler(object):
         self.opt_prob = opt_prob
         self.adapt_decay = adapt_decay
         self.air = air
-        self.prop_log_scale = [0]
+        self.log_prop_scale = [0]
         self.emp_prob = [1]
         self.adapt_periods = [0, 1]
 
     def propose(self, lam: np.ndarray, t: np.ndarray, ome: np.random.Generator) -> (mjp_skel.Skeleton, np.ndarray):
 
-        p_cond = 1 / (1 + np.exp(self.prop_log_scale[-1]))
+        p_cond = 1 / (1 + np.exp(self.log_prop_scale[-1]))
         t_cond = t[1:-1][ome.uniform(size=len(t) - 2) < p_cond]
         prop = mjp_skel.paste_partition(mjp_skel.mutate_partition(mjp_skel.partition_skeleton(self.state, t_cond), lam, ome))
         return (prop, t_cond)
@@ -91,5 +91,5 @@ class MyopicMjpSampler(object):
         self.emp_prob.append(prob)
         if len(self.emp_prob) == self.adapt_periods[-1] + 1:
             learning_rate = 1 / (len(self.adapt_periods) ** self.adapt_decay)
-            self.prop_log_scale.append(self.prop_log_scale[-1] + learning_rate * (prob - self.opt_prob))
+            self.log_prop_scale.append(self.log_prop_scale[-1] + learning_rate * (prob - self.opt_prob))
             self.adapt_periods.append(self.adapt_periods[-1] + len(self.adapt_periods) ** self.air)
