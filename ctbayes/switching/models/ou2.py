@@ -6,7 +6,7 @@ from ctbayes.switching import static
 
 @curry
 def eval_vol(thi, yt):
-    return thi[yt, 1]
+    return np.sqrt(2 * thi[yt, 0]) * thi[yt, 1]
 
 @curry
 def eval_drift(thi, yt, xt):
@@ -49,16 +49,16 @@ def eval_bounds_grad(thi_nil, thi_prime, fin_t, init_v, fin_v, lb_z, ub_z):
     ub_abs_z = max(abs(lb_z), abs(ub_z))
     ub_abs_v = max(abs(init_v), abs(fin_v))
     ub_bet = max(thi_nil[0], thi_prime[0])
-    lb_rho = min(thi_nil[1], thi_prime[1])
-    ul_dbet_phi = ub_bet * (fin_t * ub_abs_z ** 2 + (ub_abs_v / lb_rho) ** 2 + 2 * np.sqrt(fin_t) * ub_abs_z * ub_abs_v / lb_rho) + 1 / 2
-    ul_drho_phi = ub_bet ** 2 * (np.sqrt(fin_t) * ub_abs_z * ub_abs_v / lb_rho ** 2 + ub_abs_v ** 2 / lb_rho ** 3)
-    return np.array([ul_dbet_phi, ul_drho_phi])
+    lb_sig = min(thi_nil[1], thi_prime[1])
+    ul_dbet_phi = fin_t * ub_bet * ub_abs_z ** 2 + (ub_abs_v / (2 * lb_sig)) ** 2 + 3 * np.sqrt(fin_t * ub_bet / 8) * ub_abs_z * ub_abs_v / lb_sig + 1/2
+    ul_dsig_phi = ub_bet * ub_abs_v ** 2 / (2 * lb_sig ** 3) + np.sqrt(fin_t / 2) * ub_bet ** (3 / 2) * ub_abs_z * ub_abs_v / lb_sig ** 2
+    return np.array([ul_dbet_phi, ul_dsig_phi])
 
 def eval_log_prior(thi):
     if np.any(thi < 0):
         return -np.inf
-    bet, rho = thi[:, 0], thi[:, 1]
-    return -np.sum(bet + 1 / (2 * np.square(rho)) + 2 * np.log(rho))
+    bet, sig = thi[:, 0], thi[:, 1]
+    return -np.sum(np.log(bet) + bet + 3 * np.log(sig) + 1 / (2 * bet * sig ** 2))
 
 
 init_thi = np.array([1.0, 1.0])
