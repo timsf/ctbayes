@@ -50,9 +50,9 @@ class MyopicRwSampler(object):
 
     def propose(self, ome: np.random.Generator) -> (float, float):
 
-        # if self.bounds[0] == 0:
-        #     sample = np.random.lognormal(np.log(self.state), np.exp(self.log_prop_scale[-1]))
-        #     return sample, np.log(self.state) - np.log(sample)
+        if self.bounds[0] == 0:
+            sample = np.random.lognormal(np.log(self.state), np.exp(self.log_prop_scale[-1]))
+            return sample, np.log(self.state) - np.log(sample)
         return ome.normal(self.state, np.exp(self.log_prop_scale[-1])), 0
 
     def adapt(self, sample: float, prob: float):

@@ -23,9 +23,8 @@ class Model(NamedTuple):
 
 
 class Controls(NamedTuple):
-    opt_acc_prob: float = 0.17
+    opt_acc_prob: float = 0.20
     pr_portkey: float = 0.1
-    n_aux_renewals: int = 1
     n_cores: int = 1
     ea_batch_size: int = 10
 
@@ -47,8 +46,7 @@ def update_joint(thi: np.ndarray, z: seed.Partition, mod: Model, ctrl: Controls,
 
     with Parallel(ctrl.n_cores, 'loky') as pool:
         thi, z = update_params(thi, z, mod, ctrl, param_samplers, ome)
-        for _ in range(ctrl.n_aux_renewals):
-            z = update_sde(thi, z, mod, ctrl, ome, pool)
+        z = update_sde(thi, z, mod, ctrl, ome, pool)
     return thi, z
 
 
@@ -66,9 +64,9 @@ def update_params(thi_nil: np.ndarray, z: seed.Partition, mod: Model, ctrl: Cont
     prop, log_prop_odds = param_samplers[sector].propose(ome)
     thi_prime = np.array([thi_nil[i] if i != sector else prop for i in range(len(thi_nil))])
 
-    if not flip_param_precoin(thi_nil, thi_prime, mod, ome):
-        param_samplers[sector].adapt(thi_nil[sector], 0)
-        return thi_nil, z
+    #if not flip_param_precoin(thi_nil, thi_prime, mod, ome):
+    #    param_samplers[sector].adapt(thi_nil[sector], 0)
+    #    return thi_nil, z
 
     weight_nil = eval_param_weight(thi_nil, mod) + log_prop_odds
     weight_prime = eval_param_weight(thi_prime, mod)
@@ -80,7 +78,7 @@ def update_params(thi_nil: np.ndarray, z: seed.Partition, mod: Model, ctrl: Cont
 
 def eval_param_weight(thi: np.ndarray, mod: Model) -> float:
 
-    return mod.eval_biased_loglik(thi, mod.t, mod.vt)
+    return mod.eval_biased_loglik(thi, mod.t, mod.vt) + mod.eval_log_prior(thi)
 
 
 def flip_param_precoin(thi_nil: np.ndarray, thi_prime: np.ndarray, mod: Model, ome: np.random.Generator) -> bool:

@@ -25,7 +25,7 @@ class Model(NamedTuple):
 
 
 class Controls(NamedTuple):
-    opt_acc_prob: float = 0.17
+    opt_acc_prob: float = 0.20
     pr_portkey: float = 0.1
     n_cores: int = 1
     ea_batch_size: int = 10
@@ -74,20 +74,20 @@ def update_params(thi_nil: np.ndarray, z: sde_seed.Partition, h: types.Anchorage
                   ) -> (np.ndarray, sde_seed.Partition):
 
     new_ome = [np.random.default_rng(seed_) for seed_ in ome.bit_generator._seed_seq.spawn(thi_nil.shape[0])]
-    thi_part, z_part = zip(*pool(
+    acc_part, thi_part, z_part = zip(*pool(
         delayed(update_params_section)(thi_nil, z, h, mod, ctrl, param_samplers, i, sector, ome_)
         for i, ome_ in enumerate(new_ome)))
 
     thi_prime = np.array([thi_part[i][i] for i in range(thi_nil.shape[0])])
     new_z = [z_part[y0][i] for i, y0 in enumerate(h.yt[:-1])]
     for i in range(thi_nil.shape[0]):
-        param_samplers[i][sector].adapt(thi_prime[i, sector], float(thi_prime[i, sector] != thi_nil[i, sector]))
+        param_samplers[i][sector].adapt(thi_prime[i, sector], float(acc_part[i]))
     return thi_prime, new_z
 
 
 def update_params_section(thi_nil: np.ndarray, z: sde_seed.Partition, h: types.Anchorage,
                           mod: Model, ctrl: Controls, param_samplers: List[List[MyopicRwSampler]],
-                          state: int, sector: int, ome: np.random.Generator) -> (np.ndarray, sde_seed.Partition):
+                          state: int, sector: int, ome: np.random.Generator) -> (bool, np.ndarray, sde_seed.Partition):
 
     def coin() -> Generator[Tuple[bool, sde_seed.Partition], bool, None]:
         new_z = z
@@ -100,20 +100,21 @@ def update_params_section(thi_nil: np.ndarray, z: sde_seed.Partition, h: types.A
     thi_prime = thi_nil.copy()
     thi_prime[state, sector] = prop
 
-    if not flip_param_precoin(thi_nil, thi_prime, mod, ome):
-        param_samplers[state][sector].adapt(thi_nil[state][sector], 0)
-        return thi_nil, z
+    #if not flip_param_precoin(thi_nil, thi_prime, mod, ome):
+    #    param_samplers[state][sector].adapt(thi_nil[state][sector], 0)
+    #    return False, thi_nil, z
 
     weight_nil = eval_param_weight(thi_nil, h, mod, state) + log_prop_odds
     weight_prime = eval_param_weight(thi_prime, h, mod, state)
     accept, _, z_acc = sample_twocoin_joint(weight_prime, weight_nil, coin(), ctrl.pr_portkey, ome)
-    thi_acc = thi_prime if accept else thi_nil
-    return thi_acc, z_acc
+    if accept:
+        return accept, thi_prime, z_acc
+    return accept, thi_nil, z_acc
 
 
 def eval_param_weight(thi: np.ndarray, h: types.Anchorage, mod: Model, state: int = None) -> float:
 
-    return mod.eval_biased_loglik(thi, *h, state)[0]
+    return mod.eval_biased_loglik(thi, *h, state)[0] + mod.eval_log_prior(thi)
 
 
 def flip_param_precoin(thi_nil: np.ndarray, thi_prime: np.ndarray, mod: Model, ome: np.random.Generator) -> bool:
