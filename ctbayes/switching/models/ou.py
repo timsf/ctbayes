@@ -48,7 +48,7 @@ def eval_inf_disc(thi, init_y):
 def eval_bounds_grad(thi_nil, thi_prime, fin_t, init_v, fin_v, lb_z, ub_z):
     ub_abs_z = max(abs(lb_z), abs(ub_z))
     ub_abs_v = max(abs(init_v), abs(fin_v))
-    ub_bet = max(thi_nil[0], thi_nil[1])
+    ub_bet = max(thi_nil[0], thi_prime[0])
     lb_rho = min(thi_nil[1], thi_prime[1])
     ul_dbet_phi = ub_bet * (fin_t * ub_abs_z ** 2 + (ub_abs_v / lb_rho) ** 2 + 2 * np.sqrt(fin_t) * ub_abs_z * ub_abs_v / lb_rho) + 1 / 2
     ul_drho_phi = ub_bet ** 2 * (np.sqrt(fin_t) * ub_abs_z * ub_abs_v / lb_rho ** 2 + ub_abs_v ** 2 / lb_rho ** 3)
