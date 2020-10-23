@@ -31,21 +31,16 @@ def seq_update_normal(obs: np.ndarray, n: float, mean: np.ndarray, cov: np.ndarr
 
 class MyopicRwSampler(object):
 
-    def __init__(self,
-                 init_state: float,
-                 init_rate: float,
-                 bounds: (float, float) = (np.inf, np.inf),
-                 opt_prob: float = .234,
-                 adapt_decay: float = .75,
-                 air: int = 1):
+    def __init__(self, init_state: float, bounds: (float, float) = (np.inf, np.inf), opt_prob: float = .234,
+                 adapt_decay: float = .9, air: int = 1):
 
         self.prop_mean = self.running_mean = self.state = init_state
         self.bounds = bounds
         self.opt_prob = opt_prob
         self.adapt_decay = adapt_decay
         self.air = air
-        self.log_prop_scale = [init_rate]
-        self.emp_prob = [1.0]
+        self.log_prop_scale = [-1.0]
+        self.emp_prob = [opt_prob]
         self.adapt_periods = [0, 1]
 
     def propose(self, ome: np.random.Generator) -> (float, float):
@@ -53,6 +48,9 @@ class MyopicRwSampler(object):
         if self.bounds[0] == 0:
             sample = np.random.lognormal(np.log(self.state), np.exp(self.log_prop_scale[-1]))
             return sample, np.log(self.state) - np.log(sample)
+        if self.bounds[1] == 0:
+            sample = -np.random.lognormal(np.log(-self.state), np.exp(self.log_prop_scale[-1]))
+            return sample, np.log(-self.state) - np.log(-sample)
         return ome.normal(self.state, np.exp(self.log_prop_scale[-1])), 0
 
     def adapt(self, sample: float, prob: float):
@@ -68,14 +66,14 @@ class MyopicRwSampler(object):
 
 class MyopicMjpSampler(object):
 
-    def __init__(self, init_state: mjp_skel.Skeleton, opt_prob: float = .234, adapt_decay: float = .75, air: int = 1):
+    def __init__(self, init_state: mjp_skel.Skeleton, opt_prob: float = .234, adapt_decay: float = .9, air: int = 1):
 
         self.state = init_state
         self.opt_prob = opt_prob
         self.adapt_decay = adapt_decay
         self.air = air
-        self.log_prop_scale = [0]
-        self.emp_prob = [1.0]
+        self.log_prop_scale = [0.0]
+        self.emp_prob = [opt_prob]
         self.adapt_periods = [0, 1]
 
     def propose(self, lam: np.ndarray, t: np.ndarray, ome: np.random.Generator) -> (mjp_skel.Skeleton, np.ndarray):

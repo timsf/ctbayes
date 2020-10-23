@@ -38,7 +38,7 @@ def sample_posterior(init_thi: np.ndarray, mod: Model, ctrl: Controls, ome: np.r
     thi = np.repeat(init_thi[np.newaxis], lam.shape[0], 0)
     y = mjp_skel.sample_forwards(mod.t[-1], None, lam, ome)
     z, h = mod.sample_aug(thi, y, mod.t, mod.vt, ome)
-    param_samplers = [[MyopicRwSampler(init_thi_, -np.log(len(mod.t)) * lam.shape[0] / 2, bounds_thi_, ctrl.opt_acc_prob)
+    param_samplers = [[MyopicRwSampler(init_thi_, bounds_thi_, ctrl.opt_acc_prob)
                        for init_thi_, bounds_thi_ in zip(init_thi, np.array(mod.bounds_thi).T)]
                       for _ in range(lam.shape[0])]
     regime_sampler = MyopicMjpSampler(y, ctrl.opt_acc_prob)

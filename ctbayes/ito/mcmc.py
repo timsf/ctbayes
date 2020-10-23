@@ -34,7 +34,7 @@ def sample_posterior(init_thi: np.ndarray, mod: Model, ctrl: Controls, ome: np.r
 
     thi = init_thi
     z = mod.sample_aug(thi, mod.t, mod.vt, ome)
-    param_samplers = [MyopicRwSampler(init_thi_, -np.log(len(mod.t)) / 2, bounds_thi_, ctrl.opt_acc_prob)
+    param_samplers = [MyopicRwSampler(init_thi_, bounds_thi_, ctrl.opt_acc_prob)
                       for init_thi_, bounds_thi_ in zip(init_thi, np.array(mod.bounds_thi).T)]
     while True:
         thi, z = update_joint(thi, z, mod, ctrl, param_samplers, ome)
