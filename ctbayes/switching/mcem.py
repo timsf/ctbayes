@@ -8,6 +8,7 @@ from scipy.optimize import minimize
 from ctbayes.ea3lib import seed as sde_seed
 from ctbayes.mjplib import inference as mjp_inf, skeleton as mjp_skel
 from ctbayes.switching import mcmc, types
+from ctbayes.misc.adapt import MyopicMjpSampler
 
 
 class Model(NamedTuple):
@@ -38,11 +39,13 @@ def maximize_posterior(init_thi: np.ndarray, mod: Model, ctrl: Controls, ome: np
     lam = mod.hyper_lam[0] / mod.hyper_lam[1]
     lam[np.isnan(lam)] = -np.nansum(lam, 0)
     thi = np.repeat(init_thi[np.newaxis], lam.shape[0], 0)
-    zz, hh = zip(mod.sample_aug(thi, mjp_skel.sample_forwards(mod.t[-1], None, lam, ome), mod.t, mod.vt, ome))
+    y = mjp_skel.sample_forwards(mod.t[-1], None, lam, ome)
+    zz, hh = zip(mod.sample_aug(thi, y, mod.t, mod.vt, ome))
+    regime_sampler = MyopicMjpSampler(y)
     n_particles = 1
     obj_nil = -np.inf
     while True:
-        obj, thi, lam, zz, hh = iterate_em(thi, lam, zz[-1], hh[-1], mod, ctrl, n_particles, ome)
+        obj, thi, lam, zz, hh = iterate_em(thi, lam, zz[-1], hh[-1], mod, ctrl, n_particles, regime_sampler, ome)
         n_particles = int((n_particles ** (1 / ctrl.learning_rate) + 1) ** ctrl.learning_rate)
         yield obj, thi, lam, zz, hh
         if np.abs(obj - obj_nil) < ctrl.ftol:
@@ -51,11 +54,11 @@ def maximize_posterior(init_thi: np.ndarray, mod: Model, ctrl: Controls, ome: np
 
 
 def iterate_em(thi: np.ndarray, lam: np.ndarray, z: sde_seed.Partition, h: types.Anchorage,
-               mod: Model, ctrl: Controls, n_particles: int, ome: np.random.Generator
+               mod: Model, ctrl: Controls, n_particles: int, regime_sampler: MyopicMjpSampler, ome: np.random.Generator
                ) -> (float, np.ndarray, np.ndarray, List[sde_seed.Partition], List[types.Anchorage]):
 
     with Parallel(ctrl.n_cores, 'loky') as pool:
-        zz, hh = update_particles(thi, lam, z, h, n_particles, mod, ctrl, ome, pool)
+        zz, hh = update_particles(thi, lam, z, h, n_particles, mod, ctrl, regime_sampler, ome, pool)
         thi, obj_thi = update_param(thi, zz, hh, mod, ctrl, ome, pool)
         lam, obj_lam = update_generator(hh, mod.hyper_lam)
     return obj_thi + obj_lam, thi, lam, zz, hh
@@ -80,12 +83,12 @@ def update_param(thi_nil: np.ndarray, zz: List[sde_seed.Partition], hh: List[typ
 
 
 def update_particles(thi: np.ndarray, lam: np.ndarray, init_z: sde_seed.Partition, init_h: types.Anchorage,
-                     n_particles: int, mod: Model, ctrl: Controls, ome: np.random.Generator, pool: Parallel
-                     ) -> (List[sde_seed.Partition], List[types.Anchorage]):
+                     n_particles: int, mod: Model, ctrl: Controls, regime_sampler: MyopicMjpSampler, 
+                     ome: np.random.Generator, pool: Parallel) -> (List[sde_seed.Partition], List[types.Anchorage]):
 
     z, h, zz, hh = init_z, init_h, [], []
     for i in range(n_particles * ctrl.n_thin_mcmc):
-        z, h = mcmc.update_hidden(thi, lam, z, h, mcmc.Model(*mod, None), mcmc.Controls(), ome, pool)
+        z, h = mcmc.update_hidden(thi, lam, z, h, mcmc.Model(*mod, None), mcmc.Controls(), regime_sampler, ome, pool)
         if not i % ctrl.n_thin_mcmc:
             zz.append(z), hh.append(h)
     return zz, hh
