@@ -24,13 +24,16 @@ def assemble_model(init_thi, bounds_x, bounds_thi,
         return mcem.maximize_posterior(init_thi, mod, ctrl, ome)
 
     def sample_posterior(t: np.ndarray, vt: np.ndarray, n_regimes: int, a0: float = 1, b0: float = 1,
-                         ome: np.random.Generator = np.random.default_rng(), **kwargs
+                         ome: np.random.Generator = np.random.default_rng(), state=None, **kwargs
                          ) -> Iterator[Tuple[np.ndarray, np.ndarray, sde_seed.Partition, types.Anchorage]]:
 
         lam0 = construct_gen_hyperprior(n_regimes, a0, b0)
         mod = mcmc.Model(t, vt, bounds_thi, lam0, eval_log_prior, sample_aug, gen_normops,
                          eval_biased_log_lik, eval_disc, eval_bounds_disc, eval_bounds_grad)
         ctrl = mcmc.Controls(**kwargs)
+        if state is not None:
+            return mcmc.resume_sampling(state['thi'], state['lam'], state['z'], state['h'], mod, ctrl,
+                                        state['param_samplers'], state['regime_sampler'], state['ome'])
         return mcmc.sample_posterior(init_thi, mod, ctrl, ome)
 
     def gen_normops(thi: np.ndarray, t: np.ndarray, yt: np.ndarray, vt: np.ndarray,
