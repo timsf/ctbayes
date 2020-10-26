@@ -24,9 +24,10 @@ class Model(NamedTuple):
 
 class Controls(NamedTuple):
     opt_acc_prob: float = 0.20
-    pr_portkey: float = 0.1
+    pr_portkey: float = 0.01
     n_cores: int = 1
     ea_batch_size: int = 10
+    precoin: bool = True
 
 
 def sample_posterior(init_thi: np.ndarray, mod: Model, ctrl: Controls, ome: np.random.Generator
@@ -61,15 +62,18 @@ def update_params(thi_nil: np.ndarray, z: seed.Partition, mod: Model, ctrl: Cont
             state = (yield success, new_z)
 
     sector = ome.integers(0, len(thi_nil))
-    prop, log_prop_odds = param_samplers[sector].propose(ome)
+    prop, log_p_for, log_p_back = param_samplers[sector].propose(ome)
     thi_prime = np.array([thi_nil[i] if i != sector else prop for i in range(len(thi_nil))])
 
-    #if not flip_param_precoin(thi_nil, thi_prime, mod, ome):
-    #    param_samplers[sector].adapt(thi_nil[sector], 0)
-    #    return thi_nil, z
+    if ctrl.precoin:
+        if not flip_param_precoin(thi_nil, thi_prime, log_p_for, log_p_back, mod, ome):
+            param_samplers[sector].adapt(thi_nil[sector], 0)
+            return thi_nil, z
+        weight_nil = weight_prime = 0
+    else:
+        weight_nil = eval_param_weight(thi_nil, mod) + log_p_for
+        weight_prime = eval_param_weight(thi_prime, mod) + log_p_back
 
-    weight_nil = eval_param_weight(thi_nil, mod) + log_prop_odds
-    weight_prime = eval_param_weight(thi_prime, mod)
     accept, _, z_acc = sample_twocoin_joint(weight_prime, weight_nil, coin(), ctrl.pr_portkey, ome)
     thi_acc = thi_prime if accept else thi_nil
     param_samplers[sector].adapt(thi_acc[sector], float(accept))
@@ -81,11 +85,12 @@ def eval_param_weight(thi: np.ndarray, mod: Model) -> float:
     return mod.eval_biased_loglik(thi, mod.t, mod.vt) + mod.eval_log_prior(thi)
 
 
-def flip_param_precoin(thi_nil: np.ndarray, thi_prime: np.ndarray, mod: Model, ome: np.random.Generator) -> bool:
+def flip_param_precoin(thi_nil: np.ndarray, thi_prime: np.ndarray, log_p_for: float, log_p_back: float,
+                       mod: Model, ome: np.random.Generator) -> bool:
 
-    log_p_prime = mod.eval_log_prior(thi_prime)
-    log_p_nil = mod.eval_log_prior(thi_nil)
-    return np.log(ome.uniform()) < log_p_prime - np.logaddexp(log_p_prime, log_p_nil)
+    weight_prime = mod.eval_log_prior(thi_prime) + log_p_back
+    weight_nil = mod.eval_log_prior(thi_nil) + log_p_for
+    return np.log(ome.uniform()) < weight_prime - np.logaddexp(weight_prime, weight_nil)
 
 
 def flip_param_coins(thi_nil: np.ndarray, thi_prime: np.ndarray, z: seed.Partition, mod: Model, ctrl: Controls,

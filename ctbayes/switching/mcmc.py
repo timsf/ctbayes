@@ -26,9 +26,10 @@ class Model(NamedTuple):
 
 class Controls(NamedTuple):
     opt_acc_prob: float = 0.20
-    pr_portkey: float = 0.1
+    pr_portkey: float = 0.01
     n_cores: int = 1
     ea_batch_size: int = 10
+    precoin: bool = True
 
 
 def sample_posterior(init_thi: np.ndarray, mod: Model, ctrl: Controls, ome: np.random.Generator
@@ -96,16 +97,18 @@ def update_params_section(thi_nil: np.ndarray, z: sde_seed.Partition, h: types.A
             success, new_z = flip_param_coins(thi_nil, thi_prime, new_z, h, mod, ctrl, upside, ome, state)
             upside = (yield success, new_z)
 
-    prop, log_prop_odds = param_samplers[state][sector].propose(ome)
+    prop, log_p_for, log_p_back = param_samplers[state][sector].propose(ome)
     thi_prime = thi_nil.copy()
     thi_prime[state, sector] = prop
 
-    #if not flip_param_precoin(thi_nil, thi_prime, mod, ome):
-    #    param_samplers[state][sector].adapt(thi_nil[state][sector], 0)
-    #    return False, thi_nil, z
-
-    weight_nil = eval_param_weight(thi_nil, h, mod, state) + log_prop_odds
-    weight_prime = eval_param_weight(thi_prime, h, mod, state)
+    if ctrl.precoin:
+        if not flip_param_precoin(thi_nil, thi_prime, h, log_p_for, log_p_back, mod, ome, state):
+            return False, thi_nil, z
+        weight_nil = weight_prime = 0
+    else:
+        weight_nil = eval_param_weight(thi_nil, h, mod, state) + log_p_for
+        weight_prime = eval_param_weight(thi_prime, h, mod, state) + log_p_back
+    
     accept, _, z_acc = sample_twocoin_joint(weight_prime, weight_nil, coin(), ctrl.pr_portkey, ome)
     if accept:
         return accept, thi_prime, z_acc
@@ -117,11 +120,12 @@ def eval_param_weight(thi: np.ndarray, h: types.Anchorage, mod: Model, state: in
     return mod.eval_biased_loglik(thi, *h, state)[0] + mod.eval_log_prior(thi)
 
 
-def flip_param_precoin(thi_nil: np.ndarray, thi_prime: np.ndarray, mod: Model, ome: np.random.Generator) -> bool:
+def flip_param_precoin(thi_nil: np.ndarray, thi_prime: np.ndarray, h: types.Anchorage, log_p_for: float, 
+                       log_p_back: float, mod: Model, ome: np.random.Generator, state: int = None) -> bool:
 
-    log_p_prime = mod.eval_log_prior(thi_prime)
-    log_p_nil = mod.eval_log_prior(thi_nil)
-    return np.log(ome.uniform()) < log_p_prime - np.logaddexp(log_p_prime, log_p_nil)
+    weight_nil = eval_param_weight(thi_nil, h, mod, state) + log_p_for
+    weight_prime = eval_param_weight(thi_prime, h, mod, state) + log_p_back
+    return np.log(ome.uniform()) < weight_prime - np.logaddexp(weight_prime, weight_nil)
 
 
 def flip_param_coins(thi_nil: np.ndarray, thi_prime: np.ndarray, z: sde_seed.Partition, h: types.Anchorage, mod: Model,
@@ -179,8 +183,14 @@ def update_hidden_section(thi: np.ndarray, lam: np.ndarray, z_nil: sde_seed.Part
             success, new_z = flip_hidden_coins(thi, new_z, h, mod, ctrl, ome)
             yield success, new_z
 
-    weight_nil = eval_hidden_weight(thi, z_nil, h_nil, mod)
-    weight_prime = eval_hidden_weight(thi, z_prime, h_prime, mod)
+    if ctrl.precoin:
+        if not flip_hidden_precoin(thi, z_nil, h_nil, z_prime, h_prime, mod, ome):
+            return False, z_nil, h_nil
+        weight_nil = weight_prime = 0
+    else:
+        weight_nil = eval_hidden_weight(thi, z_nil, h_nil, mod)
+        weight_prime = eval_hidden_weight(thi, z_prime, h_prime, mod)
+
     accept, _, z_acc = sample_twocoin(weight_prime, weight_nil, coin(z_prime, h_prime), coin(z_nil, h_nil),
                                       ctrl.pr_portkey, z_nil, ome=ome)
     if accept:
@@ -193,6 +203,15 @@ def eval_hidden_weight(thi: np.ndarray, z: sde_seed.Partition, h: types.Anchorag
     st_lb_phi = [sde_seed.integrate_disc_bound(z_, normop, inv_normop, mod.eval_bounds_disc(thi, y0))
                  for z_, y0, (normop, inv_normop) in zip(z, h.yt, mod.gen_normops(thi, *h))]
     return sum(st_lb_phi) + sum(mod.eval_biased_loglik(thi, *h))
+
+
+def flip_hidden_precoin(thi: np.ndarray, z_nil: sde_seed.Partition, h_nil: types.Anchorage, 
+                        z_prime: sde_seed.Partition, h_prime: types.Anchorage, mod: Model, ome: np.random.Generator
+                        ) -> bool:
+
+    weight_nil = eval_hidden_weight(thi, z_nil, h_nil, mod)
+    weight_prime = eval_hidden_weight(thi, z_prime, h_prime, mod)
+    return np.log(ome.uniform()) < weight_prime - np.logaddexp(weight_prime, weight_nil)
 
 
 def flip_hidden_coins(thi: np.ndarray, z: sde_seed.Partition, h: types.Anchorage, mod: Model, ctrl: Controls,

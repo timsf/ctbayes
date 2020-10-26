@@ -58,7 +58,7 @@ def eval_log_prior(thi):
     if np.any(thi < 0):
         return -np.inf
     bet, rho = thi[:, 0], thi[:, 1]
-    return -np.sum(bet + 1 / (2 * np.square(rho)) + 2 * np.log(rho))
+    return -np.sum(bet + 1 / (np.square(rho)) + 3 * np.log(rho))
 
 
 init_thi = np.array([1.0, 1.0])

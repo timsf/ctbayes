@@ -43,15 +43,15 @@ class MyopicRwSampler(object):
         self.emp_prob = [opt_prob]
         self.adapt_periods = [0, 1]
 
-    def propose(self, ome: np.random.Generator) -> (float, float):
+    def propose(self, ome: np.random.Generator) -> (float, float, float):
 
-        if self.bounds[0] == 0:
-            sample = np.random.lognormal(np.log(self.state), np.exp(self.log_prop_scale[-1]))
-            return sample, np.log(self.state) - np.log(sample)
-        if self.bounds[1] == 0:
-            sample = -np.random.lognormal(np.log(-self.state), np.exp(self.log_prop_scale[-1]))
-            return sample, np.log(-self.state) - np.log(-sample)
-        return ome.normal(self.state, np.exp(self.log_prop_scale[-1])), 0
+        #if self.bounds[0] == 0:
+        #    sample = np.random.lognormal(np.log(self.state), np.exp(self.log_prop_scale[-1]))
+        #    return sample, -np.log(self.state), -np.log(sample)
+        #if self.bounds[1] == 0:
+        #    sample = -np.random.lognormal(np.log(-self.state), np.exp(self.log_prop_scale[-1]))
+        #    return sample, -np.log(-self.state), -np.log(-sample)
+        return ome.normal(self.state, np.exp(self.log_prop_scale[-1])), 0, 0
 
     def adapt(self, sample: float, prob: float):
 
