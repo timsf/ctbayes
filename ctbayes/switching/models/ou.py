@@ -54,11 +54,11 @@ def eval_bounds_grad(thi_nil, thi_prime, fin_t, init_v, fin_v, lb_z, ub_z):
     ul_drho_phi = ub_bet ** 2 * (np.sqrt(fin_t) * ub_abs_z * ub_abs_v / lb_rho ** 2 + ub_abs_v ** 2 / lb_rho ** 3)
     return np.array([ul_dbet_phi, ul_drho_phi])
 
-def eval_log_prior(thi):
+def eval_log_prior(thi, scale_bet=1, scale_rho=1):
     if np.any(thi < 0):
         return -np.inf
     bet, rho = thi[:, 0], thi[:, 1]
-    return -np.sum(bet + 1 / (np.square(rho)) + 3 * np.log(rho))
+    return -np.sum(np.log(bet) + np.log(rho) + np.square(np.log(bet)) / (2 * scale_bet ** 2) + np.square(np.log(np.square(rho))) / (2 * scale_rho ** 2))
 
 
 init_thi = np.array([1.0, 1.0])
