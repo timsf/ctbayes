@@ -6,7 +6,7 @@ from joblib import Parallel, delayed
 from ctbayes.ea3lib import seed as sde_seed
 from ctbayes.mjplib import inference as mjp_inf, skeleton as mjp_skel
 from ctbayes.switching import types
-from ctbayes.misc.adapt import MyopicRwSampler, MyopicMjpSampler
+from ctbayes.misc.adapt import MyopicMvRwSampler, MyopicMjpSampler
 from ctbayes.misc.bfactories import sample_twocoin, sample_twocoin_joint
 
 
@@ -39,9 +39,7 @@ def sample_posterior(init_thi: np.ndarray, mod: Model, ctrl: Controls, ome: np.r
     thi = np.repeat(init_thi[np.newaxis], lam.shape[0], 0)
     y = mjp_skel.sample_forwards(mod.t[-1], None, lam, ome)
     z, h = mod.sample_aug(thi, y, mod.t, mod.vt, ome)
-    param_samplers = [[MyopicRwSampler(init_thi_, bounds_thi_, ctrl.opt_acc_prob)
-                       for init_thi_, bounds_thi_ in zip(init_thi, np.array(mod.bounds_thi).T)]
-                      for _ in range(lam.shape[0])]
+    param_samplers = [MyopicMvRwSampler(init_thi, mod.bounds_thi, ctrl.opt_acc_prob) for _ in range(lam.shape[0])]
     regime_sampler = MyopicMjpSampler(y, ctrl.opt_acc_prob)
     while True:
         thi, lam, z, h = update_joint(thi, lam, z, h, mod, ctrl, param_samplers, regime_sampler, ome)
@@ -49,7 +47,7 @@ def sample_posterior(init_thi: np.ndarray, mod: Model, ctrl: Controls, ome: np.r
 
 
 def resume_sampling(thi: np.ndarray, lam: np.ndarray, z: sde_seed.Partition, h: types.Anchorage,
-                    mod: Model, ctrl: Controls, param_samplers: List[List[MyopicRwSampler]], 
+                    mod: Model, ctrl: Controls, param_samplers: List[MyopicMvRwSampler], 
                     regime_sampler: MyopicMjpSampler, ome: np.random.Generator
                     ) -> Iterator[Tuple[np.ndarray, np.ndarray, sde_seed.Partition, types.Anchorage]]:
     while True:
@@ -58,37 +56,36 @@ def resume_sampling(thi: np.ndarray, lam: np.ndarray, z: sde_seed.Partition, h: 
 
 
 def update_joint(thi: np.ndarray, lam: np.ndarray, z: sde_seed.Partition, h: types.Anchorage,
-                 mod: Model, ctrl: Controls, param_samplers: List[List[MyopicRwSampler]], 
+                 mod: Model, ctrl: Controls, param_samplers: List[MyopicMvRwSampler], 
                  regime_sampler: MyopicMjpSampler, ome: np.random.Generator
                  ) -> (np.ndarray, np.ndarray, sde_seed.Partition, types.Anchorage):
 
-    with Parallel(ctrl.n_cores, 'loky') as pool:
-        for sector in range(thi.shape[1]):
-            thi, z = update_params(thi, z, h, mod, ctrl, param_samplers, sector, ome, pool)
-            z, h = update_hidden(thi, lam, z, h, mod, ctrl, regime_sampler, ome, pool)
     lam = update_generator(h, mod.hyper_lam, ome)
+    with Parallel(ctrl.n_cores, 'loky') as pool:
+        thi, z = update_params(thi, z, h, mod, ctrl, param_samplers, ome, pool)
+        z, h = update_hidden(thi, lam, z, h, mod, ctrl, regime_sampler, ome, pool)
     return thi, lam, z, h
 
 
 def update_params(thi_nil: np.ndarray, z: sde_seed.Partition, h: types.Anchorage, mod: Model, ctrl: Controls, 
-                  param_samplers: List[List[MyopicRwSampler]], sector: int, ome: np.random.Generator, pool: Parallel
+                  param_samplers: List[MyopicMvRwSampler], ome: np.random.Generator, pool: Parallel
                   ) -> (np.ndarray, sde_seed.Partition):
 
     new_ome = [np.random.default_rng(seed_) for seed_ in ome.bit_generator._seed_seq.spawn(thi_nil.shape[0])]
     acc_part, thi_part, z_part = zip(*pool(
-        delayed(update_params_section)(thi_nil, z, h, mod, ctrl, param_samplers, i, sector, ome_)
+        delayed(update_params_section)(thi_nil, z, h, mod, ctrl, param_samplers, i, ome_)
         for i, ome_ in enumerate(new_ome)))
 
     thi_prime = np.array([thi_part[i][i] for i in range(thi_nil.shape[0])])
     new_z = [z_part[y0][i] for i, y0 in enumerate(h.yt[:-1])]
     for i in range(thi_nil.shape[0]):
-        param_samplers[i][sector].adapt(thi_prime[i, sector], float(acc_part[i]))
+        param_samplers[i].adapt(thi_prime[i], float(acc_part[i]))
     return thi_prime, new_z
 
 
 def update_params_section(thi_nil: np.ndarray, z: sde_seed.Partition, h: types.Anchorage,
-                          mod: Model, ctrl: Controls, param_samplers: List[List[MyopicRwSampler]],
-                          state: int, sector: int, ome: np.random.Generator) -> (bool, np.ndarray, sde_seed.Partition):
+                          mod: Model, ctrl: Controls, param_samplers: List[MyopicMvRwSampler],
+                          state: int, ome: np.random.Generator) -> (bool, np.ndarray, sde_seed.Partition):
 
     def coin() -> Generator[Tuple[bool, sde_seed.Partition], bool, None]:
         new_z = z
@@ -97,9 +94,9 @@ def update_params_section(thi_nil: np.ndarray, z: sde_seed.Partition, h: types.A
             success, new_z = flip_param_coins(thi_nil, thi_prime, new_z, h, mod, ctrl, upside, ome, state)
             upside = (yield success, new_z)
 
-    prop, log_p_for, log_p_back = param_samplers[state][sector].propose(ome)
+    prop, log_p_for, log_p_back = param_samplers[state].propose(ome)
     thi_prime = thi_nil.copy()
-    thi_prime[state, sector] = prop
+    thi_prime[state] = prop
 
     if ctrl.precoin:
         if not flip_param_precoin(thi_nil, thi_prime, h, log_p_for, log_p_back, mod, ome, state):
@@ -145,7 +142,7 @@ def flip_param_coin(thi_nil: np.ndarray, thi_prime: np.ndarray, fin_t: float, in
 
     ub_abs_dphi = mod.eval_bounds_grad(thi_nil[init_y], thi_prime[init_y], fin_t, init_v, fin_v, z_.loose_z, z_.tight_z)
     is_updating = (thi_nil != thi_prime)[init_y]
-    intensity = np.sum(np.abs((thi_nil - thi_prime)[init_y, is_updating])) * np.sum(np.abs(ub_abs_dphi[is_updating]))
+    intensity = np.sum(np.abs((thi_nil - thi_prime)[init_y, is_updating])) * np.sum(ub_abs_dphi[is_updating])
     t, yt, vt = np.array([0, fin_t]), np.array([init_y, init_y]), np.array([init_v, fin_v])
     return sde_seed.flip_dual_coin(z_, intensity,
                                    *mod.gen_normops(thi_nil, t, yt, vt)[0], mod.eval_disc(thi_nil, init_y),
